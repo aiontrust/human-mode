@@ -1,2 +1,6 @@
 node_modules/
 .DS_Store
+# The runner's data directory holds state.json, which has hashed codes and the salt. It stays on the venue machine.
+data/
+*.tmp
+.env

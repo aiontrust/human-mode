@@ -86,7 +86,17 @@
     gesture: ['amp', 'flavor', 'source'], recognition: ['outcome'],
     day: ['summary'], forgot_all: []
   };
-  var BASE_KEYS = ['t', 'day', 'kind'];
+  var BASE_KEYS = ['seq', 't', 'day', 'kind'];
+
+  /* True only if an archive entry holds nothing but the machine's own state. The venue runner
+     calls this on every entry before it is synced off-site. */
+  function auditEntry(e) {
+    var ok = ALLOWED[e.kind];
+    if (!ok) return false;
+    var keys = Object.keys(e);
+    for (var i = 0; i < keys.length; i++) if (BASE_KEYS.indexOf(keys[i]) < 0 && ok.indexOf(keys[i]) < 0) return false;
+    return !/[0-9a-f]{32,}/.test(JSON.stringify(e));
+  }
 
   function createMachine(opts) {
     opts = opts || {};
@@ -125,20 +135,34 @@
       var e = { t: Math.round(m.t * 10) / 10, day: m.day, kind: kind };
       for (var key in data) e[key] = data[key];
       m.archive.push(e);
-      /* the prototype keeps the whole run in memory; a real build writes each entry to a database */
-      if (m.archive.length > 400000) m.archive.splice(0, 50000);
+      /* opts.onLog is the durable sink (the venue runner writes each entry to the SSD).
+         m.archive is only an in-memory window: the whole run in the prototype page, a short tail in the runner. */
+      if (opts.onLog) opts.onLog(e);
+      var limit = opts.archiveLimit || 400000;
+      if (m.archive.length > limit) m.archive.splice(0, Math.ceil(limit / 8));
     }
     m.auditArchive = function () {
-      var bad = [];
-      m.archive.forEach(function (e) {
-        var ok = ALLOWED[e.kind];
-        if (!ok) { bad.push(e); return; }
-        Object.keys(e).forEach(function (key) {
-          if (BASE_KEYS.indexOf(key) < 0 && ok.indexOf(key) < 0) bad.push(e);
-        });
-        if (/[0-9a-f]{32,}/.test(JSON.stringify(e))) bad.push(e);
-      });
-      return bad;
+      return m.archive.filter(function (e) { return !auditEntry(e); });
+    };
+
+    /* ---------- Save and restore: everything needed to survive a reboot without resetting the arc.
+       The archive is not part of the state, it is written separately as it happens. ---------- */
+    function round3(v) { return Math.round(v * 1000) / 1000; }
+    m.serialize = function () {
+      return {
+        v: 1, day: m.day, t: m.t, h: m.h, wins: m.wins, winsToday: m.winsToday, revisionsToday: m.revisionsToday,
+        linesToday: m.linesToday, visitorsToday: m.visitorsToday, saltEveryDays: m.saltEveryDays, saltAge: m.saltAge,
+        salt: m.salt, nextId: m.nextId, lastLeaveT: m.lastLeaveT, ended: m.ended,
+        memory: Array.from(m.memory.entries()), guesses: m.guesses, lines: m.lines, pending: m.pending, days: m.days,
+        heat: Array.from(m.heat, round3), resid: Array.from(m.resid, round3)
+      };
+    };
+    m.restore = function (s) {
+      if (!s || s.v !== 1) throw new Error('unknown state version');
+      ['day', 't', 'h', 'wins', 'winsToday', 'revisionsToday', 'linesToday', 'visitorsToday', 'saltEveryDays', 'saltAge',
+        'salt', 'nextId', 'lastLeaveT', 'ended', 'guesses', 'lines', 'pending', 'days'].forEach(function (k) { m[k] = s[k]; });
+      m.memory = new Map(s.memory); m.heat.set(s.heat); m.resid.set(s.resid); m.visitor = null;
+      return m;
     };
 
     /* ---------- Floor heat ---------- */
@@ -324,10 +348,11 @@
     };
 
     /* ---------- Days ---------- */
-    m.advanceDay = function () {
+    /* advanceDay({ overnight: false }) skips the simulated night, for a runner that already ticks in real time */
+    m.advanceDay = function (o) {
       if (m.ended) return null;
       if (m.visitor) m.visitorLeave();
-      for (var i = 0; i < 120; i++) m.tick(30);
+      if (!o || o.overnight !== false) for (var i = 0; i < 120; i++) m.tick(30);
       var s = { day: m.day, charge: Math.round(m.charge() * 1000) / 1000, h: Math.round(m.h * 1000) / 1000,
         wins: m.winsToday, revisions: m.revisionsToday, lines: m.linesToday, visitors: m.visitorsToday };
       m.days.push(s); log('day', { summary: s });
@@ -364,6 +389,6 @@
     return m;
   }
 
-  var api = { createMachine: createMachine, sha256: sha256, CHAINS: CHAINS, DAYS: DAYS, GW: GW, GH: GH, KIOSK: KIOSK, CLEAN_R: CLEAN_R, ASP: ASP };
+  var api = { createMachine: createMachine, sha256: sha256, auditEntry: auditEntry, CHAINS: CHAINS, DAYS: DAYS, GW: GW, GH: GH, KIOSK: KIOSK, CLEAN_R: CLEAN_R, ASP: ASP };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.HumanMode = api;
 })(typeof window !== 'undefined' ? window : globalThis);
