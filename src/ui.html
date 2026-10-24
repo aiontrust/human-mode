@@ -1,0 +1,433 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Human Mode</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..500;1,6..72,300..500&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: three surfaces side by side on a wide screen (kiosk, floor, walls), stacked on a phone.
+     One dark look by choice: the room at night. Heat is the only warm colour on the page. */
+  :root {
+    --ground: #0c1013;
+    --panel: #11171b;
+    --line: #232e34;
+    --ink: #d9e2de;
+    --ink-dim: #8a9b97;
+    --ink-faint: #56655f;
+    --figure: #c9d4cf;
+    --amber: #eaa43d;
+    --teal: #1f5d63;
+    --serif: "Newsreader", Georgia, "Times New Roman", serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground); color: var(--ink);
+    font: 400 14px/1.5 var(--serif);
+    padding-block: 22px 40px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 22px; }
+  button, input, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+  header { display: flex; flex-wrap: wrap; gap: 8px 28px; align-items: end; justify-content: space-between; }
+  h1 { font: 300 clamp(28px, 5vw, 40px)/1.05 var(--serif); letter-spacing: 0.01em; margin: 0; text-wrap: balance; }
+  .sub { margin: 6px 0 0; color: var(--ink-dim); font-size: 15px; font-style: italic; max-width: 46ch; }
+  .status { display: flex; flex-wrap: wrap; gap: 4px 22px; font: 400 12px/1.4 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); }
+  .status b { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .status .mood { color: var(--amber); }
+
+  .stage { display: grid; gap: 22px 26px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+  @media (min-width: 720px) { .stage { grid-template-columns: 236px minmax(0, 1fr); } .walls { grid-column: 1 / -1; } }
+  @media (min-width: 1040px) { .stage { grid-template-columns: 236px minmax(0, 1fr) 300px; } .walls { grid-column: auto; } }
+  .cap { font: 500 11px/1.2 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 10px; }
+  .note { margin: 10px 0 0; font-size: 13px; color: var(--ink-dim); max-width: 44ch; }
+
+  .bezel { background: #090c0e; border: 1px solid var(--line); border-radius: 6px; padding: 14px; display: grid; justify-items: center; }
+  #fig { width: 192px; max-width: 100%; height: auto; aspect-ratio: 16 / 20; image-rendering: pixelated; display: block; }
+  .codeform { display: grid; gap: 8px; margin-top: 14px; }
+  .codeform label { font: 500 11px/1.2 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-dim); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; }
+  input[type=text] { background: #090c0e; border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; flex: 1 1 120px; min-width: 0; font-family: var(--mono); font-size: 13px; }
+  input[type=text]::placeholder { color: var(--ink-faint); }
+  button, select { background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 7px 11px; cursor: pointer; font: 500 11px/1.2 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink); }
+  button:hover { border-color: var(--ink-faint); background: var(--panel); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button.primary { border-color: var(--amber); color: var(--amber); }
+  select { background: #090c0e; text-transform: none; letter-spacing: 0.02em; font-weight: 400; }
+
+  .floorbox { position: relative; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--ground); touch-action: none; }
+  #floor { display: block; width: 100%; height: auto; aspect-ratio: 40 / 26; cursor: crosshair; }
+  .floorctl { margin-top: 12px; }
+
+  .walls ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; min-height: 22rem; align-content: start; }
+  .walls li { font: italic 300 19px/1.35 var(--serif); color: var(--ink); text-wrap: pretty; transition: opacity 0.25s ease; }
+  .walls li.swap { opacity: 0 !important; }
+  .walls.flat li { font-size: 16px; letter-spacing: 0.02em; color: var(--ink-dim); }
+  .walls .quiet { font: 400 12px/1.4 var(--mono); color: var(--ink-faint); }
+
+  .run { border-top: 1px solid var(--line); padding-top: 18px; display: grid; gap: 12px; }
+  .run .row { align-items: center; }
+  .run label { font: 400 12px/1.2 var(--mono); color: var(--ink-dim); display: inline-flex; gap: 8px; align-items: center; }
+  .lastday { margin: 0; font-size: 14px; color: var(--ink-dim); min-height: 1.5em; }
+
+  details { border-top: 1px solid var(--line); padding-top: 14px; }
+  summary { cursor: pointer; font: 500 11px/1.4 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); }
+  .ctl { display: grid; gap: 22px; margin-top: 16px; grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 900px) { .ctl { grid-template-columns: 260px minmax(0, 1fr); } }
+  dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font: 400 12px/1.4 var(--mono); }
+  dt { color: var(--ink-faint); }
+  dd { margin: 0; color: var(--ink); font-variant-numeric: tabular-nums; text-align: right; }
+  svg.spark { width: 100%; height: auto; display: block; }
+  svg.spark .grid { stroke: var(--line); stroke-width: 1; }
+  svg.spark .tick { fill: var(--ink-faint); font: 400 10px var(--mono); }
+  svg.spark .path { fill: none; stroke: var(--amber); stroke-width: 1.6; stroke-linejoin: round; }
+  svg.spark .end { fill: var(--amber); }
+  .log { margin: 14px 0 0; padding: 0; list-style: none; font: 400 11px/1.5 var(--mono); color: var(--ink-dim); overflow-x: auto; }
+  .log li { white-space: nowrap; }
+  .audit { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-top: 14px; font: 400 12px/1.4 var(--mono); color: var(--ink-dim); }
+  @media (prefers-reduced-motion: reduce) { .walls li { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Human Mode</h1>
+      <p class="sub">Base program, browser prototype. You play the visitor; the sensors are simulated.</p>
+    </div>
+    <div class="status" aria-live="off">
+      <span>Day <b id="s-day">1</b> of <b>42</b></span>
+      <span>Charge <b id="s-charge">100%</b></span>
+      <span class="mood" id="s-mood">charged</span>
+    </div>
+  </header>
+
+  <section class="stage">
+    <div class="kiosk">
+      <h2 class="cap">Kiosk</h2>
+      <div class="bezel"><canvas id="fig" role="img" aria-label="A pixelated figure that leans, blinks and, rarely, breaks composure"></canvas></div>
+      <form class="codeform" id="codeform" autocomplete="off">
+        <label for="code">Your own code</label>
+        <div class="row">
+          <input type="text" id="code" maxlength="40" placeholder="a word or phrase" spellcheck="false" autocapitalize="off">
+          <button type="submit" class="primary">Enter</button>
+        </div>
+      </form>
+      <p class="note">Never shown. Only a salted hash is kept, and it matches exactly.</p>
+    </div>
+
+    <div class="floor">
+      <h2 class="cap">Floor</h2>
+      <div class="floorbox"><canvas id="floor" width="800" height="520" role="img" aria-label="Top-down heat map of the machine's internal state, with a blank circle around the kiosk"></canvas></div>
+      <div class="row floorctl">
+        <button type="button" id="b-arrive">Visitor arrives</button>
+        <button type="button" id="b-next">Next person</button>
+        <button type="button" id="b-phone">Checks phone</button>
+        <button type="button" id="b-cough">Coughs</button>
+        <button type="button" id="b-leave">Leaves</button>
+      </div>
+      <p class="note">Tap or drag on the floor to place and move the visitor. The ring around the kiosk stays blank.</p>
+    </div>
+
+    <div class="walls" id="wallbox">
+      <h2 class="cap">Walls</h2>
+      <ol id="walls" aria-label="The machine's thoughts, revised in place"></ol>
+    </div>
+  </section>
+
+  <section class="run">
+    <h2 class="cap">Run</h2>
+    <div class="row">
+      <button type="button" id="b-day" class="primary">Advance a day</button>
+      <button type="button" id="b-end">Run to day 42</button>
+      <button type="button" id="b-reset">Start over</button>
+      <label for="salt">Forget all codes every
+        <select id="salt">
+          <option value="1">day</option>
+          <option value="7">7 days</option>
+          <option value="14" selected>14 days</option>
+          <option value="0">never</option>
+        </select>
+      </label>
+    </div>
+    <p class="lastday" id="lastday">A day is simulated with 14 to 35 visitors, some of whom enter a code.</p>
+  </section>
+
+  <details>
+    <summary>Control room: maintenance view, not part of the exhibited work</summary>
+    <div class="ctl">
+      <div>
+        <dl id="stats"></dl>
+        <div class="audit">
+          <button type="button" id="b-audit">Audit archive</button>
+          <span id="audit-out">Checks that nothing outside the machine's own state was recorded.</span>
+        </div>
+      </div>
+      <div>
+        <svg class="spark" id="spark" viewBox="0 0 320 110" role="img" aria-label="Charge at the end of each day across the 42-day run"></svg>
+        <ul class="log" id="log" aria-label="Most recent archive entries"></ul>
+      </div>
+    </div>
+  </details>
+</div>
+
+<script>
+/*__ENGINE__*/
+</script>
+<script>
+(function () {
+  'use strict';
+  var HM = window.HumanMode, W = 800, H = 520;
+  var $ = function (id) { return document.getElementById(id); };
+  var m, vis = null, quiet = false, paused = false, last = performance.now();
+  var wallEls = new Map();
+
+  /* ---------- renderers: walls ---------- */
+  var walls = $('walls');
+  function wallOpacity() {
+    Array.prototype.forEach.call(walls.children, function (el, i) { el.style.opacity = Math.max(0.3, 1 - i * 0.075); });
+  }
+  function rebuildWalls() {
+    walls.textContent = ''; wallEls.clear();
+    for (var i = m.lines.length - 1; i >= 0; i--) addWall(m.lines[i].id, m.lines[i].text);
+    $('wallbox').classList.toggle('flat', m.charge() < 0.3);
+  }
+  function addWall(id, text) {
+    var li = document.createElement('li'); li.textContent = text;
+    walls.insertBefore(li, walls.firstChild); wallEls.set(id, li); wallOpacity();
+  }
+  function wire() {
+    m.on('line:add', function (e) { if (quiet) return; addWall(e.id, e.text); glanceUntil = performance.now() + 600; glanceDir = Math.random() < 0.5 ? -1 : 1; $('wallbox').classList.toggle('flat', m.charge() < 0.3); });
+    m.on('line:replace', function (e) {
+      if (quiet) return; var el = wallEls.get(e.id); if (!el) return;
+      el.classList.add('swap'); setTimeout(function () { el.textContent = e.text; el.classList.remove('swap'); }, 220);
+    });
+    m.on('line:drop', function (e) { if (quiet) return; var el = wallEls.get(e.id); if (el) { el.remove(); wallEls.delete(e.id); wallOpacity(); } });
+    m.on('gesture', function (e) { if (quiet) return; gesture = { t0: performance.now(), amp: e.amp, flavor: e.flavor }; });
+    m.on('unsent', function (e) { if (quiet) return; unsent = { t0: performance.now(), dir: e.dir }; });
+    m.on('approach', function (e) { overshoot = e.overshoot; });
+  }
+
+  /* ---------- renderers: kiosk figure ---------- */
+  var fig = $('fig'), fctx = fig.getContext('2d'), FW = 16, FH = 20, CELL = 12;
+  var dpr = Math.min(window.devicePixelRatio || 1, 3);
+  fig.width = FW * CELL * dpr; fig.height = FH * CELL * dpr;
+  var css = getComputedStyle(document.documentElement);
+  function hexRGB(h) { h = h.trim().replace('#', ''); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]; }
+  function mix(a, b, t) { return 'rgb(' + [0, 1, 2].map(function (i) { return Math.round(a[i] + (b[i] - a[i]) * t); }).join(',') + ')'; }
+  var cFigure = hexRGB(css.getPropertyValue('--figure') || '#c9d4cf'), cAmber = hexRGB(css.getPropertyValue('--amber') || '#eaa43d');
+  var cDim = hexRGB('#4d5c59');
+  var gesture = null, unsent = null, glanceUntil = 0, glanceDir = 1, overshoot = 1;
+  var lean = 0, samples = [], heldTarget = 0, heldSince = 0, nextBlink = performance.now() + 3000, blinkUntil = 0;
+
+  function targetLean(now) {
+    var v = vis;
+    if (v) {
+      var d = Math.sqrt(Math.pow(v.x - 0.5, 2) + Math.pow((v.y - 0.9) * HM.ASP, 2));
+      var near = Math.max(0, Math.min(1, 1 - d / 0.8));
+      heldTarget = Math.max(-1, Math.min(1, (v.x - 0.5) * 3 * (0.4 + 0.6 * near) * overshoot));
+      heldSince = now; return heldTarget;
+    }
+    /* after the visitor leaves, the figure keeps the posture a moment too long */
+    var since = (now - heldSince) / 1000;
+    return since < 3.5 ? heldTarget : heldTarget * Math.max(0, 1 - (since - 3.5) / 4);
+  }
+  function drawFigure(now, dt) {
+    var c = m.charge(), amp = 0.35 + 0.65 * c;
+    samples.push({ t: now, v: targetLean(now) });
+    while (samples.length > 2 && samples[1].t < now - 700) samples.shift();       /* it answers a beat late */
+    lean += (samples[0].v * amp - lean) * Math.min(1, dt * 4);
+    var extraLean = 0, bob = 0, flare = 0, shoulderLift = 0;
+    if (unsent) {
+      var up = (now - unsent.t0) / 900;
+      if (up >= 1) unsent = null; else extraLean = unsent.dir * 0.7 * amp * Math.sin(Math.PI * up);
+    }
+    if (gesture) {
+      var gp = (now - gesture.t0) / 1000;
+      if (gp >= 1) gesture = null; else {
+        var env = Math.sin(Math.PI * gp), ga = Math.max(0.15, gesture.amp);
+        flare = env * Math.max(0.35, ga);
+        if (gesture.flavor === 0) bob = -env * 3 * ga;
+        else if (gesture.flavor === 2) shoulderLift = -env * 2 * ga;
+        else if (gesture.flavor === 3) extraLean += env * 0.9 * ga;
+        else bob = -env * 1.2 * ga;
+      }
+    }
+    var L = lean + extraLean, hx = 7.5 + L * 1.7, hy = 6.5 + bob, sx = 7.5 + L * 0.8;
+    if (now > nextBlink) { blinkUntil = now + 140; nextBlink = now + 2500 + Math.random() * 3500; }
+    var blinking = now < blinkUntil, glancing = now < glanceUntil;
+    var eyeX = Math.round(hx) + (glancing ? glanceDir : 1), eyeY = Math.round(hy) - 0;
+    var px = CELL * dpr;
+    fctx.clearRect(0, 0, fig.width, fig.height);
+    for (var y = 0; y < FH; y++) for (var x = 0; x < FW; x++) {
+      var on = false, head = false;
+      var ex = (x - hx) / 3.7, ey = (y - hy) / 4.5;
+      if (ex * ex + ey * ey <= 1) { on = true; head = true; }
+      var sy = y + shoulderLift;
+      if (!on && y >= 11 && y <= 12 && Math.abs(x - sx) <= 1.2) on = true;
+      if (!on && sy >= 13 && Math.abs(x - sx) <= 3.2 + (sy - 13) * 1.25) on = true;
+      if (!on) continue;
+      var isEye = head && x === eyeX && y === eyeY;
+      var col = isEye ? (blinking ? mix(cFigure, cDim, 0.6) : mix(cAmber, cAmber, 0)) : mix(cFigure, cAmber, head ? flare * (0.4 + 0.6 * (1 - y / 12)) : flare * 0.35);
+      fctx.fillStyle = col;
+      fctx.fillRect(Math.round(x * px), Math.round(y * px), Math.round((x + 1) * px) - Math.round(x * px), Math.round((y + 1) * px) - Math.round(y * px));
+    }
+  }
+
+  /* ---------- renderers: floor ---------- */
+  var floor = $('floor'), xctx = floor.getContext('2d');
+  var heatCanvas = document.createElement('canvas'); heatCanvas.width = HM.GW; heatCanvas.height = HM.GH;
+  var hctx = heatCanvas.getContext('2d'), img = hctx.createImageData(HM.GW, HM.GH);
+  var STOPS = [[0, '#0c1013'], [0.22, '#11303a'], [0.45, '#1f5d63'], [0.68, '#c28a3a'], [0.85, '#eaa43d'], [1, '#fff0c8']].map(function (s) { return [s[0], hexRGB(s[1])]; });
+  var LUT = []; for (var li = 0; li < 256; li++) {
+    var tt = li / 255, a = STOPS[0], b = STOPS[STOPS.length - 1];
+    for (var si = 0; si < STOPS.length - 1; si++) if (tt >= STOPS[si][0] && tt <= STOPS[si + 1][0]) { a = STOPS[si]; b = STOPS[si + 1]; break; }
+    var f = (tt - a[0]) / Math.max(1e-6, b[0] - a[0]);
+    LUT.push([0, 1, 2].map(function (i) { return Math.round(a[1][i] + (b[1][i] - a[1][i]) * f); }));
+  }
+  function drawFloor() {
+    var d = img.data, hh = m.heat;
+    for (var k = 0; k < hh.length; k++) {
+      var c = LUT[Math.max(0, Math.min(255, Math.round(hh[k] * 255)))];
+      d[k * 4] = c[0]; d[k * 4 + 1] = c[1]; d[k * 4 + 2] = c[2]; d[k * 4 + 3] = 255;
+    }
+    hctx.putImageData(img, 0, 0);
+    xctx.imageSmoothingEnabled = true; xctx.imageSmoothingQuality = 'high';
+    xctx.drawImage(heatCanvas, 0, 0, W, H);
+    var kx = HM.KIOSK.x * W, ky = HM.KIOSK.y * H;
+    xctx.setLineDash([5, 6]); xctx.strokeStyle = 'rgba(217,226,222,0.3)'; xctx.lineWidth = 1.5;
+    xctx.beginPath(); xctx.arc(kx, ky, HM.CLEAN_R * W, 0, Math.PI * 2); xctx.stroke(); xctx.setLineDash([]);
+    xctx.fillStyle = '#090c0e'; xctx.strokeStyle = 'rgba(217,226,222,0.55)'; xctx.lineWidth = 2;
+    xctx.fillRect(kx - 22, ky - 9, 44, 18); xctx.strokeRect(kx - 22, ky - 9, 44, 18);
+    if (vis) {
+      var vx = vis.x * W, vy = vis.y * H;
+      xctx.strokeStyle = '#d9e2de'; xctx.lineWidth = 2; xctx.beginPath(); xctx.arc(vx, vy, 13, 0, Math.PI * 2); xctx.stroke();
+      xctx.fillStyle = '#d9e2de'; xctx.beginPath(); xctx.arc(vx, vy, 3, 0, Math.PI * 2); xctx.fill();
+    }
+  }
+
+  /* ---------- sensing simulation: pointer input stands in for depth sensors ---------- */
+  var dragging = false;
+  function place(ev) {
+    var r = floor.getBoundingClientRect();
+    vis = { x: Math.max(0.02, Math.min(0.98, (ev.clientX - r.left) / r.width)), y: Math.max(0.04, Math.min(0.97, (ev.clientY - r.top) / r.height)) };
+  }
+  floor.addEventListener('pointerdown', function (ev) { dragging = true; floor.setPointerCapture(ev.pointerId); place(ev); });
+  floor.addEventListener('pointermove', function (ev) { if (dragging) place(ev); });
+  floor.addEventListener('pointerup', function () { dragging = false; });
+  floor.addEventListener('pointercancel', function () { dragging = false; });
+
+  function ensureVisitor() { if (!vis) vis = { x: 0.5, y: 0.62 }; }
+  $('b-arrive').addEventListener('click', ensureVisitor);
+  $('b-leave').addEventListener('click', function () { vis = null; m.visitorLeave(); });
+  $('b-next').addEventListener('click', function () { m.visitorLeave(); vis = { x: 0.15 + Math.random() * 0.7, y: 0.3 + Math.random() * 0.4 }; });
+  $('b-phone').addEventListener('click', function () { ensureVisitor(); m.sense(vis.x, vis.y, 0.01); m.visitorEvent('phone'); });
+  $('b-cough').addEventListener('click', function () { ensureVisitor(); m.sense(vis.x, vis.y, 0.01); m.visitorEvent('cough'); });
+  $('codeform').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var input = $('code'), code = input.value;
+    if (!code) return;
+    ensureVisitor(); m.sense(vis.x, vis.y, 0.01);
+    m.enterCode(code); input.value = '';
+  });
+
+  /* ---------- run controls ---------- */
+  var busy = false;
+  function setBusy(b) { busy = b; ['b-day', 'b-end', 'b-reset'].forEach(function (id) { $(id).disabled = b; }); }
+  function runOneDay() {
+    quiet = true; vis = null;
+    var before = m.charge(), s = m.simulateDay();
+    quiet = false; rebuildWalls();
+    return s ? { s: s, before: before } : null;
+  }
+  function report(r) {
+    if (!r) { $('lastday').textContent = 'The exhibition has ended. Start over to run it again.'; return; }
+    var s = r.s;
+    $('lastday').textContent = 'Day ' + s.day + ': ' + s.visitors + ' visitors, ' + s.wins + ' gestures, ' + s.revisions + ' silent revisions. Charge ' + Math.round(r.before * 100) + '% to ' + Math.round(s.charge * 100) + '%.';
+    if (s.day >= HM.DAYS) $('lastday').textContent += ' The exhibition has ended.';
+  }
+  $('b-day').addEventListener('click', function () { setBusy(true); setTimeout(function () { report(runOneDay()); setBusy(false); refreshAll(); }, 30); });
+  $('b-end').addEventListener('click', function () {
+    setBusy(true);
+    (function step() {
+      if (m.ended) { setBusy(false); refreshAll(); return; }
+      var r = runOneDay(); report(r); refreshAll();
+      setTimeout(step, 40);
+    })();
+  });
+  $('b-reset').addEventListener('click', boot);
+  $('salt').addEventListener('change', function () { m.saltEveryDays = Number($('salt').value); });
+
+  /* ---------- control room ---------- */
+  var statsEl = $('stats'), logEl = $('log'), sparkEl = $('spark'), lastSparkDays = -1;
+  function pct(x) { return Math.round(x * 100) + '%'; }
+  function refreshStats() {
+    var rows = [
+      ['Day', m.day + ' of ' + HM.DAYS], ['Charge', pct(m.charge())], ['Habituation', pct(m.h)],
+      ['Gestures today', m.winsToday], ['Gestures in total', m.wins], ['Silent revisions today', m.revisionsToday],
+      ['Salt age', m.saltAge + (m.saltEveryDays ? ' of ' + m.saltEveryDays + ' days' : ' days, never rotates')],
+      ['Hashed codes held', m.memory.size], ['Loose guesses held', m.guesses.length], ['Archive entries', m.archive.length]
+    ];
+    statsEl.innerHTML = rows.map(function (r) { return '<dt>' + r[0] + '</dt><dd>' + r[1] + '</dd>'; }).join('');
+  }
+  function refreshLog() {
+    var tail = m.archive.slice(-9).reverse();
+    logEl.innerHTML = tail.map(function (e) {
+      var body = e.kind === 'line' || e.kind === 'revision' ? '#' + e.id + ' v' + e.ver + ' ' + e.text
+        : e.kind === 'gesture' ? 'amp ' + e.amp + ' flavor ' + e.flavor + ' via ' + e.source
+        : e.kind === 'recognition' ? e.outcome
+        : e.kind === 'hidden_revision' ? e.topic + ' v' + e.ver
+        : e.kind === 'day' ? 'charge ' + pct(e.summary.charge) + ', ' + e.summary.wins + ' gestures' : '';
+      var li = document.createElement('li'); li.textContent = 'd' + String(e.day).padStart(2, '0') + '  ' + e.kind.padEnd(16) + body.slice(0, 64);
+      return li.outerHTML;
+    }).join('');
+  }
+  function refreshSpark() {
+    if (m.days.length === lastSparkDays && m.days.length) return; lastSparkDays = m.days.length;
+    var L = 34, R = 308, T = 10, B = 92, n = HM.DAYS;
+    function X(d) { return L + (R - L) * (d - 1) / (n - 1); } function Y(c) { return B - (B - T) * c; }
+    var pts = [[1, 1]].concat(m.days.map(function (s) { return [s.day, s.charge]; }));
+    var end = pts[pts.length - 1];
+    sparkEl.innerHTML = '<line class="grid" x1="' + L + '" y1="' + Y(1) + '" x2="' + R + '" y2="' + Y(1) + '"/><line class="grid" x1="' + L + '" y1="' + Y(0.5) + '" x2="' + R + '" y2="' + Y(0.5) + '"/><line class="grid" x1="' + L + '" y1="' + Y(0) + '" x2="' + R + '" y2="' + Y(0) + '"/>' +
+      '<text class="tick" x="' + (L - 6) + '" y="' + (Y(1) + 3) + '" text-anchor="end">100%</text><text class="tick" x="' + (L - 6) + '" y="' + (Y(0.5) + 3) + '" text-anchor="end">50%</text><text class="tick" x="' + (L - 6) + '" y="' + (Y(0) + 3) + '" text-anchor="end">0</text>' +
+      '<text class="tick" x="' + L + '" y="106">day 1</text><text class="tick" x="' + R + '" y="106" text-anchor="end">day 42</text>' +
+      '<polyline class="path" points="' + pts.map(function (p) { return X(p[0]).toFixed(1) + ',' + Y(p[1]).toFixed(1); }).join(' ') + '"/>' +
+      '<circle class="end" r="3.2" cx="' + X(end[0]).toFixed(1) + '" cy="' + Y(end[1]).toFixed(1) + '"/>';
+  }
+  $('b-audit').addEventListener('click', function () {
+    var bad = m.auditArchive();
+    $('audit-out').textContent = bad.length ? bad.length + ' entries hold fields outside the machine\'s own state.' : m.archive.length + ' entries checked. Every field is the machine\'s own state. No codes, hashes, paths, or sensor data.';
+  });
+
+  function refreshHud() {
+    var c = m.charge();
+    $('s-day').textContent = m.day; $('s-charge').textContent = pct(c);
+    $('s-mood').textContent = c > 0.66 ? 'charged' : c > 0.3 ? 'wearing down' : 'flat';
+  }
+  function refreshAll() { refreshHud(); refreshStats(); refreshLog(); refreshSpark(); }
+
+  /* ---------- main loop ---------- */
+  function frame(now) {
+    var dt = Math.min(0.1, (now - last) / 1000); last = now;
+    if (!paused && !busy) { if (vis) m.sense(vis.x, vis.y, dt); m.tick(dt); }
+    drawFloor(); drawFigure(now, dt);
+    requestAnimationFrame(frame);
+  }
+  document.addEventListener('visibilitychange', function () { paused = document.hidden; last = performance.now(); });
+
+  function boot() {
+    vis = null; quiet = false; gesture = null; unsent = null; samples = []; lean = 0; heldTarget = 0; lastSparkDays = -1;
+    m = HM.createMachine({ saltEveryDays: Number($('salt').value) });
+    wire();
+    quiet = true; for (var i = 0; i < 24; i++) m.tick(2); quiet = false;
+    rebuildWalls();
+    $('lastday').textContent = 'A day is simulated with 14 to 35 visitors, some of whom enter a code.';
+    setBusy(false); refreshAll();
+  }
+  boot();
+  setInterval(function () { if (!busy) { refreshHud(); refreshStats(); refreshLog(); } }, 600);
+  requestAnimationFrame(frame);
+})();
+</script>

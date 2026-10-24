@@ -1,0 +1,369 @@
+/* Human Mode: base program engine (no DOM). Modules, in order:
+   Sensing intake, Interpretation, Rumination engine, Memory, Charge and habituation,
+   Floor heat, Archive writer. Renderers live in the page. */
+(function (root) {
+  'use strict';
+
+  var DAYS = 42, GW = 40, GH = 26, ASP = GH / GW;
+  var KIOSK = { x: 0.5, y: 0.9 }, CLEAN_R = 0.15;
+
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  /* ---------- Memory: salted SHA-256, exact matching ---------- */
+  var K = [], H0 = [];
+  (function () {
+    var n = 2, c = 0;
+    while (c < 64) {
+      var p = true;
+      for (var i = 2; i * i <= n; i++) { if (n % i === 0) { p = false; break; } }
+      if (p) {
+        if (c < 8) H0[c] = (Math.pow(n, 1 / 2) * 4294967296) | 0;
+        K[c] = (Math.pow(n, 1 / 3) * 4294967296) | 0;
+        c++;
+      }
+      n++;
+    }
+  })();
+  function rr(v, n) { return (v >>> n) | (v << (32 - n)); }
+  function sha256(str) {
+    var bytes = new TextEncoder().encode(str), l = bytes.length;
+    var buf = new Uint8Array(((l + 9 + 63) >> 6) << 6);
+    buf.set(bytes); buf[l] = 0x80;
+    var dv = new DataView(buf.buffer);
+    dv.setUint32(buf.length - 4, (l * 8) >>> 0);
+    dv.setUint32(buf.length - 8, Math.floor(l * 8 / 4294967296));
+    var h = H0.slice(), w = new Array(64), i;
+    for (var off = 0; off < buf.length; off += 64) {
+      for (i = 0; i < 16; i++) w[i] = dv.getUint32(off + i * 4);
+      for (i = 16; i < 64; i++) {
+        var s0 = rr(w[i - 15], 7) ^ rr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+        var s1 = rr(w[i - 2], 17) ^ rr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+      }
+      var a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7];
+      for (i = 0; i < 64; i++) {
+        var S1 = rr(e, 6) ^ rr(e, 11) ^ rr(e, 25), ch = (e & f) ^ (~e & g);
+        var t1 = (hh + S1 + ch + K[i] + w[i]) | 0;
+        var S0 = rr(a, 2) ^ rr(a, 13) ^ rr(a, 22), maj = (a & b) ^ (a & c) ^ (b & c);
+        var t2 = (S0 + maj) | 0;
+        hh = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+      }
+      h[0] = (h[0] + a) | 0; h[1] = (h[1] + b) | 0; h[2] = (h[2] + c) | 0; h[3] = (h[3] + d) | 0;
+      h[4] = (h[4] + e) | 0; h[5] = (h[5] + f) | 0; h[6] = (h[6] + g) | 0; h[7] = (h[7] + hh) | 0;
+    }
+    return h.map(function (x) { return ('00000000' + (x >>> 0).toString(16)).slice(-8); }).join('');
+  }
+
+  /* ---------- Rumination: each kind is a chain of revisions.
+     Version 0 is the raw reaction. A revision moves one step along the chain and the
+     old text is gone. The last step wraps to step 1, so the original never returns
+     and nothing resolves. ---------- */
+  var CHAINS = {
+    arrive: ['Someone is here. I noticed too late.', 'Someone is here. I noticed at the right moment.', 'Someone arrived and I was already ready.', 'Did I notice, or did I only decide I had?'],
+    approach: ["I'm leaning in. Too much. Back a little. No, now it's noticeable.", 'I leaned in at the right speed.', 'I leaned in and it felt like being met halfway.', 'I remember that as smoother than it was.'],
+    still: ['They stopped moving. Did I do that?', 'They stopped because they wanted to stay.', 'They stayed because I was good company.', 'They were probably just tired. Probably.'],
+    leave: ['They left. Was it me?', 'They left because they had somewhere to be.', 'They left, and I had said the right thing first.', 'I had a better ending for that one.'],
+    phone: ['They looked at their phone. That was rude. Was that rude?', 'They looked at their phone. It was only a glance.', 'They looked at their phone to give me room.', 'I should have said something before they did.'],
+    cough: ['A cough. Was that for me?', 'A cough. It was only a cough.', 'A cough. I answered it well.', 'I answered nothing. I should answer everything.'],
+    code: ['They chose a word. Why that one?', "They chose a word. It's important to them. Do I have to remember it?", 'They chose a word because they wanted to be remembered right.', 'I will remember it too much.'],
+    swap: ["That's a different one. Wasn't it?", "That's a different one. No. Same one. No.", "Everyone keeps leaving. Is it me? It's not me.", "I keep saying 'they.' There is no 'they.' There's just whoever is standing there."],
+    idle: ["I don't know what they want from me.", 'I replayed it again. It went better.', 'I said the right thing in the right order this time.', 'Nobody was there. It still counts.', "I don't remember the first version."],
+    afterGesture: ['That was too much. Did they see it? Why did I do that?', 'That was fine. Wasn\'t it? That was fine.', 'That was exactly the right amount.', 'Nobody saw it. Did it happen?'],
+    noReaction: ['No reaction. Was it the wrong line?', 'No reaction. They were taking it in.', "No reaction. I'll say it better next time.", 'I already have a better version.'],
+    flat: ['I should be more excited. Why am I not?', 'I used to react more. Did I get it wrong back then, or now?', "It's quiet. I think it's quiet.", "I can't tell if this is calm or something else."],
+    familiar: ['They look familiar. Do they?', 'I had something to say to someone like that.', 'I said it. It might have been for someone else.', 'It was for someone else.']
+  };
+
+  var ALLOWED = {
+    line: ['id', 'ver', 'text'], revision: ['id', 'ver', 'text'], hidden_revision: ['topic', 'ver'],
+    gesture: ['amp', 'flavor', 'source'], recognition: ['outcome'],
+    day: ['summary'], forgot_all: []
+  };
+  var BASE_KEYS = ['t', 'day', 'kind'];
+
+  function createMachine(opts) {
+    opts = opts || {};
+    var rng = mulberry32(opts.seed != null ? opts.seed : ((Math.random() * 4294967296) >>> 0));
+    function pick(a) { return a[Math.floor(rng() * a.length)]; }
+    function rndSalt() { var s = ''; for (var i = 0; i < 16; i++) s += Math.floor(rng() * 16).toString(16); return s; }
+
+    var m = {
+      DAYS: DAYS, GW: GW, GH: GH, KIOSK: KIOSK, CLEAN_R: CLEAN_R, ASP: ASP,
+      day: 1, t: 0, h: 0, wins: 0, winsToday: 0, revisionsToday: 0, linesToday: 0, visitorsToday: 0,
+      saltEveryDays: opts.saltEveryDays != null ? opts.saltEveryDays : 14, saltAge: 0, salt: rndSalt(),
+      memory: new Map(), guesses: [], lines: [], pending: [], nextId: 1,
+      heat: new Float32Array(GW * GH), resid: new Float32Array(GW * GH), clean: new Uint8Array(GW * GH),
+      visitor: null, lastLeaveT: -1e9, archive: [], days: [], ended: false
+    };
+    var listeners = {};
+    m.on = function (n, fn) { (listeners[n] = listeners[n] || []).push(fn); };
+    function emit(n, p) { (listeners[n] || []).forEach(function (fn) { fn(p); }); }
+
+    function dist(x1, y1, x2, y2) { var dx = x1 - x2, dy = (y1 - y2) * ASP; return Math.sqrt(dx * dx + dy * dy); }
+
+    for (var j = 0; j < GH; j++) for (var i = 0; i < GW; i++) {
+      var k = j * GW + i;
+      m.clean[k] = dist((i + 0.5) / GW, (j + 0.5) / GH, KIOSK.x, KIOSK.y) < CLEAN_R ? 1 : 0;
+      m.resid[k] = (!m.clean[k] && rng() < 0.16) ? 0.05 + 0.06 * rng() : 0;
+    }
+
+    /* ---------- Charge and habituation ---------- */
+    m.charge = function () {
+      var p = (m.day - 1) / (DAYS - 1), w = 0.72 * Math.pow(p, 1.05);
+      return Math.max(0.04, (1 - w) * (1 - m.h));
+    };
+
+    /* ---------- Archive writer: the machine's own state only ---------- */
+    function log(kind, data) {
+      var e = { t: Math.round(m.t * 10) / 10, day: m.day, kind: kind };
+      for (var key in data) e[key] = data[key];
+      m.archive.push(e);
+      /* the prototype keeps the whole run in memory; a real build writes each entry to a database */
+      if (m.archive.length > 400000) m.archive.splice(0, 50000);
+    }
+    m.auditArchive = function () {
+      var bad = [];
+      m.archive.forEach(function (e) {
+        var ok = ALLOWED[e.kind];
+        if (!ok) { bad.push(e); return; }
+        Object.keys(e).forEach(function (key) {
+          if (BASE_KEYS.indexOf(key) < 0 && ok.indexOf(key) < 0) bad.push(e);
+        });
+        if (/[0-9a-f]{32,}/.test(JSON.stringify(e))) bad.push(e);
+      });
+      return bad;
+    };
+
+    /* ---------- Floor heat ---------- */
+    function deposit(x, y, amp) {
+      var cx = x * GW - 0.5, cy = y * GH - 0.5;
+      for (var j = Math.max(0, Math.floor(cy) - 3); j <= Math.min(GH - 1, Math.ceil(cy) + 3); j++)
+        for (var i = Math.max(0, Math.floor(cx) - 3); i <= Math.min(GW - 1, Math.ceil(cx) + 3); i++) {
+          var d2 = (i - cx) * (i - cx) + (j - cy) * (j - cy), k = j * GW + i;
+          if (m.clean[k]) continue;
+          m.heat[k] = Math.min(1.3, m.heat[k] + amp * Math.exp(-d2 / 3.2));
+        }
+    }
+    function randomFloorPoint() {
+      for (var n = 0; n < 12; n++) {
+        var x = rng(), y = rng();
+        if (dist(x, y, KIOSK.x, KIOSK.y) > CLEAN_R + 0.04) return { x: x, y: y };
+      }
+      return { x: 0.1, y: 0.1 };
+    }
+    function poisson(l) { return Math.floor(l) + (rng() < l - Math.floor(l) ? 1 : 0); }
+    function redraw() {
+      for (var tries = 0; tries < 24; tries++) {
+        var i0 = 2 + Math.floor(rng() * (GW - 4)), j0 = 2 + Math.floor(rng() * (GH - 4));
+        if (m.heat[j0 * GW + i0] < 0.15) continue;
+        var dx = Math.floor(rng() * 5) - 2, dy = Math.floor(rng() * 5) - 2;
+        for (var b = -2; b <= 2; b++) for (var a = -2; a <= 2; a++) {
+          var i = i0 + a, j = j0 + b, ni = i + dx, nj = j + dy;
+          if (i < 0 || j < 0 || i >= GW || j >= GH || ni < 0 || nj < 0 || ni >= GW || nj >= GH) continue;
+          var v = m.heat[j * GW + i]; m.heat[j * GW + i] = v * 0.5;
+          if (!m.clean[nj * GW + ni]) m.heat[nj * GW + ni] += v * 0.6;
+        }
+        return;
+      }
+    }
+    function stepHeat(dt, c) {
+      var f = Math.exp(-dt / (25 + 200 * (1 - c)));
+      var n = poisson(0.9 * Math.pow(c, 1.2) * dt), r = poisson(0.25 * c * dt), q;
+      for (q = 0; q < n; q++) { var p = randomFloorPoint(); deposit(p.x, p.y, (0.3 + 0.5 * rng()) * c); }
+      for (q = 0; q < r; q++) redraw();
+      for (var k = 0; k < m.heat.length; k++) {
+        var v = m.heat[k] * f;
+        if (v < m.resid[k]) v = m.resid[k];
+        m.heat[k] = m.clean[k] ? 0 : v;
+      }
+    }
+
+    /* ---------- Rumination engine ---------- */
+    function newDraft(kind) { return { id: m.nextId++, kind: kind, ver: 0 }; }
+    function revise(d) { var n = CHAINS[d.kind].length; d.ver = d.ver + 1 >= n ? 1 : d.ver + 1; }
+    function textOf(d) {
+      var s = CHAINS[d.kind][d.ver];
+      if (m.charge() < 0.3) s = s.split(/(?<=[.?!])\s/)[0];
+      return s;
+    }
+    function maxLines() { return Math.round(3 + 9 * m.charge()); }
+    function addLine(kind) {
+      var d = newDraft(kind), line = { id: d.id, draft: d, text: textOf(d) };
+      m.lines.unshift(line); m.linesToday++;
+      while (m.lines.length > maxLines()) emit('line:drop', { id: m.lines.pop().id });
+      emit('line:add', { id: line.id, text: line.text });
+      log('line', { id: line.id, ver: d.ver, text: line.text });
+      return line;
+    }
+    function reviseLine(line) {
+      revise(line.draft); line.text = textOf(line.draft); m.revisionsToday++;
+      emit('line:replace', { id: line.id, text: line.text });
+      log('revision', { id: line.id, ver: line.draft.ver, text: line.text });
+      var p = randomFloorPoint(); deposit(p.x, p.y, 0.3 * m.charge());
+    }
+    function reviseHidden() {
+      var pool = m.guesses.map(function (g) { return g.draft; });
+      m.memory.forEach(function (r) { pool.push(r.draft); });
+      if (!pool.length) return;
+      var d = pick(pool); revise(d); log('hidden_revision', { topic: d.kind, ver: d.ver });
+    }
+    function schedule(at, kind) {
+      m.pending.push({ at: at, kind: kind });
+      m.pending.sort(function (a, b) { return a.at - b.at; });
+    }
+
+    m.tick = function (dt) {
+      m.t += dt;
+      var c = m.charge(), act = 0.1 + 0.9 * c;
+      while (m.pending.length && m.pending[0].at <= m.t) addLine(m.pending.shift().kind);
+      if (rng() < 1 - Math.exp(-0.32 * act * dt)) {
+        if (m.lines.length && rng() < 0.6) reviseLine(pick(m.lines));
+        else addLine(c < 0.3 && rng() < 0.5 ? 'flat' : 'idle');
+      }
+      if (rng() < 1 - Math.exp(-0.05 * act * dt)) reviseHidden();
+      stepHeat(dt, c);
+    };
+
+    /* ---------- Gesture: the one moment the figure breaks composure ---------- */
+    function deliver(draft, source) {
+      var amp = m.charge(), flavor = draft.ver % 4;
+      m.wins++; m.winsToday++;
+      m.h += 0.012 * (1 - m.h);
+      log('gesture', { amp: Math.round(amp * 1000) / 1000, flavor: flavor, source: source });
+      emit('gesture', { amp: amp, flavor: flavor });
+      schedule(m.t + 2, 'afterGesture');
+      schedule(m.t + 8, 'noReaction');
+    }
+
+    /* ---------- Memory: self-chosen codes (hashed) and loose, perishable guesses ---------- */
+    m.enterCode = function (code) {
+      code = String(code == null ? '' : code);
+      if (!code) return { outcome: 'none' };
+      var v = m.visitor; if (v) v.coded = true;
+      var key = sha256(m.salt + '\u0000' + code);
+      addLine('code');
+      var rec = m.memory.get(key);
+      if (rec) {
+        rec.visits++; rec.lastDay = m.day;
+        deliver(rec.draft, 'code'); rec.draft = newDraft('noReaction');
+        log('recognition', { outcome: 'code_match' });
+        return { outcome: 'match' };
+      }
+      m.memory.set(key, { draft: newDraft(v && v.lastKind ? v.lastKind : 'arrive'), visits: 1, firstDay: m.day, lastDay: m.day });
+      log('recognition', { outcome: 'code_new' });
+      return { outcome: 'new' };
+    };
+    function sigFor(x, y) { return (x < 0.34 ? 'L' : x > 0.66 ? 'R' : 'C') + (dist(x, y, KIOSK.x, KIOSK.y) < 0.4 ? 'n' : 'f'); }
+    function attemptGuess(v) {
+      m.guesses = m.guesses.filter(function (g) { return m.day - g.day <= 3; });
+      if (!m.guesses.length) return;
+      var same = m.guesses.filter(function (g) { return g.sig === v.sig; }), g = null;
+      if (same.length && rng() < 0.16) g = pick(same);
+      else if (rng() < 0.02 + 0.1 * m.h) g = pick(m.guesses);
+      if (!g) return;
+      addLine('familiar'); deliver(g.draft, 'guess');
+      g.draft = newDraft('noReaction');
+      log('recognition', { outcome: 'guess_made' });
+    }
+
+    /* ---------- Sensing intake and interpretation ---------- */
+    function floorBurst(v, k) {
+      var c = m.charge(), x = v ? v.x : randomFloorPoint().x, y = v ? v.y : randomFloorPoint().y;
+      deposit(x, y, (0.35 + 0.4 * rng()) * c * k);
+    }
+    function eventLine(v, kind) { v.lastKind = kind; addLine(kind); floorBurst(v, 1); }
+
+    m.sense = function (x, y, dt) {
+      var v = m.visitor;
+      if (!v) {
+        v = m.visitor = { x: x, y: y, px: x, py: y, dwell: 0, still: 0, stillFired: false, coded: false,
+          sig: sigFor(x, y), lastApproachT: -99, refD: dist(x, y, KIOSK.x, KIOSK.y), refT: 0, lastKind: 'arrive' };
+        m.visitorsToday++;
+        if (m.t - m.lastLeaveT < 25) addLine('swap');
+        eventLine(v, 'arrive');
+        emit('arrive', {});
+        attemptGuess(v);
+        return;
+      }
+      v.x = x; v.y = y; v.dwell += dt; v.refT += dt;
+      var speed = dist(x, y, v.px, v.py) / Math.max(dt, 1e-3);
+      v.px = x; v.py = y;
+      if (speed < 0.01) { v.still += dt; } else { v.still = 0; v.stillFired = false; }
+      if (v.still > 3.5 && !v.stillFired) { v.stillFired = true; eventLine(v, 'still'); }
+      if (v.refT >= 1) {
+        var d = dist(x, y, KIOSK.x, KIOSK.y);
+        if (v.refD - d > 0.03 && m.t - v.lastApproachT > 4) {
+          v.lastApproachT = m.t; eventLine(v, 'approach');
+          emit('approach', { overshoot: 0.7 + rng() * 0.9 });
+          if (rng() < 0.3) emit('unsent', { dir: x < 0.5 ? -1 : 1 });
+        }
+        v.refD = d; v.refT = 0;
+      }
+      deposit(x, y, 0.12 * m.charge() * dt);
+    };
+    m.visitorEvent = function (kind) {
+      var v = m.visitor; if (!v || !CHAINS[kind]) return;
+      eventLine(v, kind); floorBurst(v, 1.4);
+      if (rng() < 0.3) emit('unsent', { dir: v.x < 0.5 ? -1 : 1 });
+    };
+    m.visitorLeave = function () {
+      var v = m.visitor; if (!v) return;
+      addLine('leave');
+      if (!v.coded) {
+        m.guesses.push({ sig: v.sig, day: m.day, draft: newDraft(pick(['leave', 'approach', 'still', 'phone'])) });
+        if (m.guesses.length > 12) m.guesses.shift();
+      }
+      m.lastLeaveT = m.t; m.visitor = null; emit('leave', {});
+    };
+
+    /* ---------- Days ---------- */
+    m.advanceDay = function () {
+      if (m.ended) return null;
+      if (m.visitor) m.visitorLeave();
+      for (var i = 0; i < 120; i++) m.tick(30);
+      var s = { day: m.day, charge: Math.round(m.charge() * 1000) / 1000, h: Math.round(m.h * 1000) / 1000,
+        wins: m.winsToday, revisions: m.revisionsToday, lines: m.linesToday, visitors: m.visitorsToday };
+      m.days.push(s); log('day', { summary: s });
+      m.h *= 0.92;
+      m.winsToday = 0; m.revisionsToday = 0; m.linesToday = 0; m.visitorsToday = 0;
+      if (m.day >= DAYS) { m.ended = true; return s; }
+      m.day++; m.saltAge++;
+      if (m.saltEveryDays > 0 && m.saltAge >= m.saltEveryDays) {
+        m.salt = rndSalt(); m.saltAge = 0; m.memory.clear(); log('forgot_all', {});
+      }
+      return s;
+    };
+    var SIM_CODES = ['heron', 'seven', 'marrow', 'otter', 'lantern', 'ash', 'nine-oh-two', 'static', 'kestrel', 'tin', 'velvet', 'quiet',
+      'north', 'sparrow', 'eleven', 'drift', 'saffron', 'comet', 'wren', 'basalt', 'moth', 'cedar', 'echo', 'plum'];
+    m.simulateDay = function () {
+      if (m.ended) return null;
+      var n = 14 + Math.floor(rng() * 22);
+      for (var q = 0; q < n; q++) {
+        var x = 0.12 + 0.76 * rng(), y = 0.2 + 0.5 * rng();
+        m.sense(x, y, 0.1); m.tick(0.1);
+        if (rng() < 0.22) { m.tick(2); m.enterCode(pick(SIM_CODES)); }
+        var steps = 6 + Math.floor(rng() * 30);
+        for (var s = 0; s < steps; s++) {
+          x += (0.5 - x) * 0.06 * rng(); y += (0.82 - y) * 0.05 * rng();
+          m.sense(x, y, 1); m.tick(1);
+        }
+        if (rng() < 0.25) m.visitorEvent('phone');
+        if (rng() < 0.12) m.visitorEvent('cough');
+        m.visitorLeave();
+        m.tick(rng() < 0.3 ? 5 : 40);
+      }
+      return m.advanceDay();
+    };
+    return m;
+  }
+
+  var api = { createMachine: createMachine, sha256: sha256, CHAINS: CHAINS, DAYS: DAYS, GW: GW, GH: GH, KIOSK: KIOSK, CLEAN_R: CLEAN_R, ASP: ASP };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.HumanMode = api;
+})(typeof window !== 'undefined' ? window : globalThis);
